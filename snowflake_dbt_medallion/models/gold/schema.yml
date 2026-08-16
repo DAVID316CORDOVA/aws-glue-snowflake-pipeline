@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: dim_players
+    columns:
+      - name: player_id
+        tests:
+          - unique
+          - not_null
+
+  - name: mart_players_por_ciudad
+    columns:
+      - name: total_jugadores
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: player_compliance_exceptions
+    columns:
+      - name: player_id
+        tests:
+          - not_null

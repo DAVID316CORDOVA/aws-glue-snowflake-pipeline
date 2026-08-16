@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: raw_layer
+    database: PLAYER_ANALYTICS
+    schema: RAW
+    tables:
+      - name: player_data

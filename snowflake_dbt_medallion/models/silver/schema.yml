@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: stg_player_data
+    columns:
+      - name: player_id
+        tests:
+          - unique
+          - not_null
+
+      - name: email
+        tests:
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+              row_condition: "flag_email_invalido = false"
+              config:
+                severity: warn
+
+      - name: national_id_type_code
+        tests:
+          - accepted_values:
+              values: [1, 2, 3]
+
+      - name: currency_code
+        tests:
+          - accepted_values:
+              values: [4, 14]
+
+      - name: gender_code
+        tests:
+          - accepted_values:
+              values: [1, 2, 3]
+
+      - name: edad_al_registro
+        tests:
+          # Ages outside 0-120 signal a data quality problem in birth_date
+          # (e.g. a typo like year 1900 or a future date), not real players.
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 120
+              config:
+                severity: warn
