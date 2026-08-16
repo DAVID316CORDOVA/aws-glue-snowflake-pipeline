@@ -2,6 +2,10 @@
 ## providers.tf
 ## Two providers: AWS for Glue/S3/SQS/SNS, Snowflake for the
 ## database that will receive the extracted player data.
+## Remote state backend: stored in S3 so both local runs and CI/CD
+## read and write the same state file -- without this, GitHub Actions
+## would have no memory of resources already created, and would try
+## to recreate everything from scratch.
 ## =================================================================
 
 terraform {
@@ -14,6 +18,12 @@ terraform {
       source  = "snowflakedb/snowflake"
       version = "~> 0.95"
     }
+  }
+
+  backend "s3" {
+    bucket = "dlk-infra-211125514336"
+    key    = "player-analytics/terraform.tfstate"
+    region = "us-east-1"
   }
 }
 
