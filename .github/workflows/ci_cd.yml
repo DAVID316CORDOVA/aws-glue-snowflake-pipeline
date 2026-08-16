@@ -1,0 +1,145 @@
+name: Glue + Snowflake Pipeline CI/CD
+
+# CI runs on every push or pull request, validating Terraform and dbt
+# changes without applying anything. CD runs only after CI succeeds
+# AND only on a direct push to main -- deploying the Glue script and
+# infrastructure changes, then running dbt against production.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------------------------------------------------------------
+  # CI: validates changes. Runs on every push and PR (including from
+  # the dev branch), never touches real infrastructure.
+  # ---------------------------------------------------------------
+  ci-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform plan (validation only, never applied here)
+        working-directory: terraform
+        env:
+          TF_VAR_snowflake_password: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+        run: terraform plan
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt
+        run: pip install dbt-core==1.12.2 dbt-snowflake==1.12.0
+
+      - name: Install dbt packages
+        working-directory: snowflake_dbt_medallion
+        run: dbt deps
+
+      - name: dbt run (dev)
+        working-directory: snowflake_dbt_medallion
+        env:
+          DBT_SNOWFLAKE_PASSWORD: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+          DBT_PROFILES_DIR: .
+        run: dbt run --target dev
+
+      - name: dbt test (dev)
+        working-directory: snowflake_dbt_medallion
+        env:
+          DBT_SNOWFLAKE_PASSWORD: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+          DBT_PROFILES_DIR: .
+        run: dbt test --target dev
+
+  # ---------------------------------------------------------------
+  # CD: deploys the Glue script, applies infrastructure changes, and
+  # runs dbt against prod. Only runs after ci-validate succeeds, and
+  # only on a direct push to main (never on pull_request), so
+  # unmerged code never touches real infrastructure.
+  # ---------------------------------------------------------------
+  cd-deploy:
+    needs: ci-validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      # This step replaces the manual "aws s3 cp" used while developing --
+      # every push to main now automatically deploys the latest Glue
+      # script, instead of requiring a manual upload.
+      - name: Deploy Glue script to S3
+        run: |
+          aws s3 cp glue_scripts/func_player_raw.py \
+            s3://aws-glue-assets-211125514336-us-east-1/scripts/func_player_raw.py
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: terraform
+        env:
+          TF_VAR_snowflake_password: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+        run: terraform apply -auto-approve
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt
+        run: pip install dbt-core==1.12.2 dbt-snowflake==1.12.0
+
+      - name: Install dbt packages
+        working-directory: snowflake_dbt_medallion
+        run: dbt deps
+
+      - name: dbt run (prod)
+        working-directory: snowflake_dbt_medallion
+        env:
+          DBT_SNOWFLAKE_PASSWORD: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+          DBT_PROFILES_DIR: .
+        run: dbt run --target prod
+
+      - name: dbt test (prod)
+        working-directory: snowflake_dbt_medallion
+        env:
+          DBT_SNOWFLAKE_PASSWORD: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+          DBT_PROFILES_DIR: .
+        run: dbt test --target prod
+
+      - name: dbt snapshot (prod)
+        working-directory: snowflake_dbt_medallion
+        env:
+          DBT_SNOWFLAKE_PASSWORD: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+          DBT_PROFILES_DIR: .
+        run: dbt snapshot --target prod
