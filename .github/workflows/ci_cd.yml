@@ -40,6 +40,7 @@ jobs:
         working-directory: terraform
         env:
           TF_VAR_snowflake_password: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+          TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
         run: terraform plan
 
       - name: Set up Python
@@ -109,6 +110,7 @@ jobs:
         working-directory: terraform
         env:
           TF_VAR_snowflake_password: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
+          TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
         run: terraform apply -auto-approve
 
       - name: Set up Python
