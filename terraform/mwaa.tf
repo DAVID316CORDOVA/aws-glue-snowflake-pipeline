@@ -208,7 +208,7 @@ resource "aws_mwaa_environment" "player_pipeline" {
   # a private network path (VPN/bastion), matching the private
   # subnets already chosen. If you need to access the UI directly
   # from your laptop, this would need to be PUBLIC_ONLY instead.
-  webserver_access_mode = "PRIVATE_ONLY"
+  webserver_access_mode = "PUBLIC_ONLY"
 
   logging_configuration {
     dag_processing_logs {
