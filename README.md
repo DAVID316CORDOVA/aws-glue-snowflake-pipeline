@@ -54,6 +54,24 @@ Snowflake's compute handles the heavy lifting instead of Spark.
 | **GitHub Actions** | Two-stage CI/CD: `ci-validate` runs `terraform plan` + `dbt run/test` against dev on every push (including the `dev` branch); `cd-deploy` runs `terraform apply` + `dbt run/test/snapshot` against prod, only on a push to `main`. |
 | **SNS + Lambda** | Any Airflow task failure (after retries are exhausted) publishes to an SNS topic, which fans out to an email subscription and a Lambda that posts to a Slack webhook. |
 
+
+## dbt documentation & lineage
+
+Auto-generated model documentation, including full column-level lineage
+across the medallion layers, is available at:
+
+**[Live docs (GitHub Pages)](https://david316cordova.github.io/aws-glue-snowflake-pipeline/dbt-docs/)**
+
+![dbt lineage graph](docs/dbt-lineage.png)
+
+The graph traces the full flow: the raw source, through `bronze_player_data`,
+into the parallel `stg_player_data` (staging) and `player_data_incremental`
+paths, out to `dim_players`, `player_status_snapshot` (SCD2), and
+`player_compliance_exceptions`, and finally into the Gold-layer mart
+(`mart_players_por_ciudad`) and a dedicated compliance test
+(`assert_no_underage_in_dim_players`) that fails the build if any
+underage player appears in the dimensional model.
+
 ## Failure alerting
 
 The DAG's `default_args` includes an `on_failure_callback` that fires once
