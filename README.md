@@ -78,6 +78,38 @@ The Lambda reads the Slack webhook URL from AWS Secrets Manager at
 runtime — it is never hardcoded or passed as a plain environment variable,
 and never committed to this repo.
 
+### Dead letter queue: two distinct failure modes
+
+While testing alert delivery, a subtle distinction surfaced that is worth
+documenting: SNS-to-Lambda subscriptions have two separate DLQ
+mechanisms, each catching a different kind of failure.
+
+- `redrive_policy` on the SNS subscription catches delivery failures --
+  cases where SNS could not invoke the Lambda at all (permissions,
+  throttling). It does not catch failures where the Lambda was
+  successfully invoked but then threw an exception during its own
+  execution.
+- `dead_letter_config` on the Lambda function itself catches execution
+  failures -- exceptions raised inside the function's code after
+  Lambda's own automatic async-invoke retries (2 by default) are
+  exhausted.
+
+This was confirmed empirically: breaking the Slack webhook on purpose
+produced three Lambda invocations (visible in CloudWatch Logs, same
+request ID, each throwing HTTPError: HTTP Error 404), none of which
+reached the SNS-level DLQ -- because SNS successfully invoked the Lambda
+every time. Only after adding dead_letter_config to the Lambda itself
+did the failed message correctly land in the DLQ
+(pipeline-alert-slack-dlq).
+
+Both mechanisms point to the same SQS queue in this project for
+simplicity; a larger system might separate them to distinguish which
+failure mode produced a given message. Messages in the DLQ are retained
+for a limited period (SQS default/max retention), so it is an
+operational tool for near-term inspection and reprocessing, not a
+permanent audit log -- CloudWatch Logs with explicit retention, or an
+export to S3/a table, would be the right place for that.
+
 ## Known issues found in production
 
 Two real bugs were found and documented (rather than silently fixed) while
