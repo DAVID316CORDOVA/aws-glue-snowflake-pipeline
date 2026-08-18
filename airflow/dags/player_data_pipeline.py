@@ -132,6 +132,7 @@ with DAG(
     dbt_run = BashOperator(
         task_id="dbt_run",
         bash_command=f"cd {DBT_PROJECT_DIR} && dbt run",
+
     )
 
     dbt_test = BashOperator(

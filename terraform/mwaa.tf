@@ -1,29 +1,14 @@
 ## =================================================================
 ## mwaa.tf
-## Amazon MWAA environment to run the Airflow DAG in a fully managed
-## service, instead of only locally in Docker. Reuses existing shared
-## networking (VPC, subnets, NAT Gateway) -- imported below, not
-## recreated -- to avoid duplicating infrastructure.
-##
-## COST WARNING: aws_mwaa_environment bills continuously while it
-## exists (~$0.49/hour for mw1.small), with no auto-suspend. Only
-## apply this when actively testing, and destroy it right after
-## (terraform destroy -target=aws_mwaa_environment.player_pipeline)
-## rather than leaving it running.
+## Amazon MWAA environment. Runs in a dedicated VPC (mwaa_network.tf)
+## instead of the shared VPCDatalake VPC.
 ## =================================================================
-
-## -----------------------------------------------------------------
-## SECURITY GROUP (already exists, imported)
-## -----------------------------------------------------------------
 
 resource "aws_security_group" "mwaa" {
   name        = "mwaa-sg"
   description = "Security Group for MWAA Airflow environment"
-  vpc_id      = "vpc-0c916cec2856e4f36"
+  vpc_id      = aws_vpc.mwaa_prod.id
 
-  ## Self-referencing rule: required by MWAA so its internal
-  ## components (scheduler, webserver, workers) can talk to each
-  ## other -- this is the standard pattern for MWAA security groups.
   ingress {
     from_port = 0
     to_port   = 0
@@ -38,11 +23,6 @@ resource "aws_security_group" "mwaa" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
-
-
-## -----------------------------------------------------------------
-## S3 BUCKET FOR MWAA DAGS (already exists, imported)
-## -----------------------------------------------------------------
 
 resource "aws_s3_bucket" "mwaa_dags" {
   bucket = "dlk-mwaa-211125514336"
@@ -66,12 +46,6 @@ resource "aws_s3_bucket_public_access_block" "mwaa_dags" {
 resource "aws_iam_role" "mwaa_execution" {
   name = "AmazonMWAA-dlk-role"
 
-  # MWAA requires trust from BOTH services: airflow-env.amazonaws.com
-  # is used during environment provisioning, while airflow.amazonaws.com
-  # is used by the running Airflow service itself (task execution,
-  # metric publishing). Missing either one causes CREATE_FAILED with
-  # a generic INCORRECT_CONFIGURATION error and no useful logs, since
-  # the failure happens before Airflow's own components ever start.
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -88,10 +62,6 @@ resource "aws_iam_role" "mwaa_execution" {
 
   description = "Execution role for MWAA Airflow environment"
 }
-
-
-
-
 
 resource "aws_iam_policy" "mwaa_s3_access" {
   name = "MWAA-DLK-S3-Access"
@@ -126,9 +96,6 @@ resource "aws_iam_role_policy_attachment" "mwaa_s3" {
   policy_arn = aws_iam_policy.mwaa_s3_access.arn
 }
 
-## Additional permissions MWAA needs that weren't created manually
-## yet: CloudWatch Logs (to write scheduler/task logs) and permission
-## to call the Glue job this pipeline triggers.
 resource "aws_iam_role_policy" "mwaa_logs_and_glue" {
   name = "mwaa-logs-and-glue-access"
   role = aws_iam_role.mwaa_execution.id
@@ -171,24 +138,16 @@ resource "aws_iam_role_policy" "mwaa_logs_and_glue" {
         Resource = "arn:aws:airflow:us-east-1:211125514336:environment/*"
       },
       {
-        # Allows the on_failure_callback in player_data_pipeline.py
-        # to publish failure alerts to the pipeline-alerts SNS topic.
         Effect   = "Allow"
         Action   = ["sns:Publish"]
         Resource = "arn:aws:sns:us-east-1:211125514336:player-pipeline-alerts"
       }
-
     ]
   })
 }
 
-
-## -----------------------------------------------------------------
-## MWAA ENVIRONMENT (new -- not yet created)
-## -----------------------------------------------------------------
-
 resource "aws_mwaa_environment" "player_pipeline" {
-  name              = "player-data-pipeline-mwaa"
+  name               = "player-data-pipeline-mwaa"
   airflow_version    = "2.10.3"
   environment_class  = "mw1.small"
   execution_role_arn = aws_iam_role.mwaa_execution.arn
@@ -199,15 +158,11 @@ resource "aws_mwaa_environment" "player_pipeline" {
   network_configuration {
     security_group_ids = [aws_security_group.mwaa.id]
     subnet_ids = [
-      "subnet-06633febbc517c762",
-      "subnet-0c9c2ac9a3b0b9b97"
+      aws_subnet.mwaa_prod_a.id,
+      aws_subnet.mwaa_prod_b.id
     ]
   }
 
-  # No public endpoint -- MWAA's webserver is only reachable through
-  # a private network path (VPN/bastion), matching the private
-  # subnets already chosen. If you need to access the UI directly
-  # from your laptop, this would need to be PUBLIC_ONLY instead.
   webserver_access_mode = "PUBLIC_ONLY"
 
   logging_configuration {

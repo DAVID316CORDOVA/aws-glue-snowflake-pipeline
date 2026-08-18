@@ -111,7 +111,7 @@ jobs:
         env:
           TF_VAR_snowflake_password: ${{ secrets.DBT_SNOWFLAKE_PASSWORD }}
           TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -exclude=aws_mwaa_environment.player_pipeline
 
       - name: Set up Python
         uses: actions/setup-python@v5
